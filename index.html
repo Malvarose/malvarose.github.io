@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Availability App</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #f0f0f0; padding: 20px; }
+  h1,h2 { text-align: center; }
+  .card { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+  input, select, button { padding: 6px; margin: 4px 0; }
+  button { cursor: pointer; }
+  .day-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .availability-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+  .entry-buttons { margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>Weekly Availability</h1>
+  <label>
+    Name: <input type="text" id="name">
+  </label>
+  <label>
+    Timezone:
+    <select id="timezone"></select>
+  </label>
+  <div id="availability-inputs"></div>
+  <button onclick="saveAvailability()">Save Availability</button>
+  <button onclick="clearAll()">Clear All</button>
+</div>
+
+<div class="card">
+  <h2>All Availabilities (in your timezone)</h2>
+  <div id="availability-list"></div>
+</div>
+
+<script>
+const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const availabilityInputs = document.getElementById('availability-inputs');
+const availabilityList = document.getElementById('availability-list');
+const timezoneSelect = document.getElementById('timezone');
+const nameInput = document.getElementById('name');
+
+let editingIndex = null;
+const viewerTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Populate timezones
+Intl.supportedValuesOf('timeZone').forEach(tz => {
+  const option = document.createElement('option');
+  option.value = tz;
+  option.textContent = tz;
+  timezoneSelect.appendChild(option);
+});
+
+// Generate inputs
+days.forEach(day => {
+  const div = document.createElement('div');
+  div.className = 'day-row';
+  div.innerHTML = `<strong>${day}:</strong> <input type="time" id="${day}-start"> - <input type="time" id="${day}-end">`;
+  availabilityInputs.appendChild(div);
+});
+
+// Load saved availabilities
+let allAvailabilities = JSON.parse(localStorage.getItem('availabilities') || '[]');
+renderList();
+
+function formatTime12Hour(date) {
+  let h = date.getHours();
+  const m = date.getMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${m.toString().padStart(2,'0')} ${ampm}`;
+}
+
+function convertToViewer(timeStr, userTz) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  // Use a fixed date (today) for conversion
+  const date = new Date();
+  date.setHours(h, m, 0, 0);
+  const utcString = date.toLocaleString('en-US', { timeZone: userTz, hour12: false });
+  const utcDate = new Date(utcString);
+  const viewerTimeString = utcDate.toLocaleString('en-US', { timeZone: viewerTimezone, hour: '2-digit', minute: '2-digit', hour12: true });
+  return viewerTimeString;
+}
+
+function saveAvailability() {
+  const name = nameInput.value.trim();
+  if (!name) { alert('Enter your name'); return; }
+  const timezone = timezoneSelect.value;
+  const availability = {};
+  days.forEach(day => {
+    const start = document.getElementById(`${day}-start`).value;
+    const end = document.getElementById(`${day}-end`).value;
+    availability[day] = { start, end };
+  });
+
+  if (editingIndex !== null) {
+    allAvailabilities[editingIndex] = { name, timezone, availability };
+    editingIndex = null;
+  } else {
+    allAvailabilities.push({ name, timezone, availability });
+  }
+
+  localStorage.setItem('availabilities', JSON.stringify(allAvailabilities));
+  clearInputs();
+  renderList();
+}
+
+function clearInputs() {
+  nameInput.value = '';
+  editingIndex = null;
+  days.forEach(day => {
+    document.getElementById(`${day}-start`).value = '';
+    document.getElementById(`${day}-end`).value = '';
+  });
+}
+
+function clearAll() {
+  if (!confirm('Clear all availabilities?')) return;
+  allAvailabilities = [];
+  localStorage.removeItem('availabilities');
+  renderList();
+}
+
+function renderList() {
+  availabilityList.innerHTML = '';
+  if (allAvailabilities.length === 0) {
+    availabilityList.textContent = 'No availabilities submitted yet.';
+    return;
+  }
+
+  allAvailabilities.forEach((entry, index) => {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `<strong>${entry.name}</strong> (original timezone: ${entry.timezone})`;
+
+    const grid = document.createElement('div');
+    grid.className = 'availability-grid';
+    days.forEach(day => {
+      const cell = document.createElement('div');
+      const a = entry.availability[day];
+      const start = convertToViewer(a.start, entry.timezone);
+      const end = convertToViewer(a.end, entry.timezone);
+      cell.innerHTML = `<strong>${day}</strong><br>${start && end ? `${start} - ${end}` : 'Not Available'}`;
+      grid.appendChild(cell);
+    });
+    div.appendChild(grid);
+
+    const buttonsDiv = document.createElement('div');
+    buttonsDiv.className = 'entry-buttons';
+    buttonsDiv.innerHTML = `
+      <button onclick="editEntry(${index})">Edit</button>
+      <button onclick="deleteEntry(${index})">Delete</button>
+    `;
+    div.appendChild(buttonsDiv);
+
+    availabilityList.appendChild(div);
+  });
+}
+
+function editEntry(index) {
+  const entry = allAvailabilities[index];
+  nameInput.value = entry.name;
+  timezoneSelect.value = entry.timezone;
+  days.forEach(day => {
+    document.getElementById(`${day}-start`).value = entry.availability[day].start;
+    document.getElementById(`${day}-end`).value = entry.availability[day].end;
+  });
+  editingIndex = index;
+}
+
+function deleteEntry(index) {
+  if (!confirm('Delete this entry?')) return;
+  allAvailabilities.splice(index, 1);
+  localStorage.setItem('availabilities', JSON.stringify(allAvailabilities));
+  renderList();
+}
+</script>
+
+</body>
+</html>
